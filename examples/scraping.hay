@@ -1,0 +1,21 @@
+// Web scraping examples with hayweb
+
+import("sheep-farm/hayweb", as=web)
+
+// Extract text from HTML
+let html = "<html><body><h1>Welcome</h1><p>This is a test page.</p></body></html>"
+let text = web::scrape_text(html)
+print("Extracted text:")
+print(text)
+
+// Extract links from HTML
+let links_html = "<a href=\"https://example.com\">Example</a><a href=\"/about\">About</a>"
+let links = web::scrape_links(links_html)
+print("Links:")
+print(links)
+
+// Extract images from HTML
+let images_html = "<img src=\"logo.png\"><img src=\"/images/banner.jpg\">"
+let images = web::scrape_images(images_html)
+print("Images:")
+print(images)

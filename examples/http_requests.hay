@@ -1,0 +1,14 @@
+// HTTP request examples with hayweb
+
+import("sheep-farm/hayweb", as=web)
+
+// HTTP GET request
+let response = web::http_get("https://httpbin.org/get", "{}", 30)
+print("GET response:")
+print(response)
+
+// HTTP POST request with JSON body
+let body = "{\"name\":\"test\",\"value\":123}"
+let post_response = web::http_post("https://httpbin.org/post", body, "{}", 30)
+print("POST response:")
+print(post_response)
