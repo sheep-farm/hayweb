@@ -35,19 +35,24 @@ pub fn http_get(url: String, headers: String, timeout: i64) -> String {
     match request.send() {
         Ok(response) => {
             let status = response.status().as_u16();
-            let headers_out = response.headers().iter()
+            let headers_out = response
+                .headers()
+                .iter()
                 .map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap_or("")))
                 .collect::<Vec<_>>()
                 .join("\n");
-            
+
             match response.text() {
                 Ok(body) => {
-                    format!("Status: {}\nHeaders:\n{}\nBody:\n{}", status, headers_out, body)
+                    format!(
+                        "Status: {}\nHeaders:\n{}\nBody:\n{}",
+                        status, headers_out, body
+                    )
                 }
-                Err(e) => format!("Error reading body: {}", e)
+                Err(e) => format!("Error reading body: {}", e),
             }
         }
-        Err(e) => format!("Request failed: {}", e)
+        Err(e) => format!("Request failed: {}", e),
     }
 }
 
@@ -80,19 +85,24 @@ pub fn http_post(url: String, body: String, headers: String, timeout: i64) -> St
     match request.send() {
         Ok(response) => {
             let status = response.status().as_u16();
-            let headers_out = response.headers().iter()
+            let headers_out = response
+                .headers()
+                .iter()
                 .map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap_or("")))
                 .collect::<Vec<_>>()
                 .join("\n");
-            
+
             match response.text() {
                 Ok(response_body) => {
-                    format!("Status: {}\nHeaders:\n{}\nBody:\n{}", status, headers_out, response_body)
+                    format!(
+                        "Status: {}\nHeaders:\n{}\nBody:\n{}",
+                        status, headers_out, response_body
+                    )
                 }
-                Err(e) => format!("Error reading body: {}", e)
+                Err(e) => format!("Error reading body: {}", e),
             }
         }
-        Err(e) => format!("Request failed: {}", e)
+        Err(e) => format!("Request failed: {}", e),
     }
 }
 
@@ -109,7 +119,7 @@ fn scrape_text_impl(html: String) -> String {
     let mut result = String::new();
     let mut in_tag = false;
     let chars = html.chars().peekable();
-    
+
     for c in chars {
         if c == '<' {
             in_tag = true;
@@ -119,7 +129,7 @@ fn scrape_text_impl(html: String) -> String {
             result.push(c);
         }
     }
-    
+
     // Clean up whitespace
     result.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -134,18 +144,18 @@ pub fn scrape_links(html: String) -> String {
 
 fn scrape_links_impl(html: String) -> String {
     let mut links = Vec::new();
-    
+
     // Simple regex-like extraction for href attributes
     let mut chars = html.chars().peekable();
     let mut buffer = String::new();
-    
+
     while let Some(c) = chars.next() {
         buffer.push(c);
-        
+
         if buffer.ends_with("href=\"") {
             buffer.clear();
             let mut link = String::new();
-            
+
             while let Some(&next_c) = chars.peek() {
                 if next_c == '"' {
                     chars.next();
@@ -154,15 +164,17 @@ fn scrape_links_impl(html: String) -> String {
                     }
                     break;
                 }
-                if let Some(c) = chars.next() { link.push(c); }
+                if let Some(c) = chars.next() {
+                    link.push(c);
+                }
             }
         }
-        
+
         if buffer.len() > 100 {
             buffer.clear();
         }
     }
-    
+
     serde_json::to_string(&links).unwrap_or_else(|_| "[]".to_string())
 }
 
@@ -176,18 +188,18 @@ pub fn scrape_images(html: String) -> String {
 
 fn scrape_images_impl(html: String) -> String {
     let mut images = Vec::new();
-    
+
     // Simple extraction for src attributes in img tags
     let mut chars = html.chars().peekable();
     let mut buffer = String::new();
-    
+
     while let Some(c) = chars.next() {
         buffer.push(c);
-        
+
         if buffer.to_lowercase().ends_with("src=\"") {
             buffer.clear();
             let mut src = String::new();
-            
+
             while let Some(&next_c) = chars.peek() {
                 if next_c == '"' {
                     chars.next();
@@ -196,15 +208,17 @@ fn scrape_images_impl(html: String) -> String {
                     }
                     break;
                 }
-                if let Some(c) = chars.next() { src.push(c); }
+                if let Some(c) = chars.next() {
+                    src.push(c);
+                }
             }
         }
-        
+
         if buffer.len() > 100 {
             buffer.clear();
         }
     }
-    
+
     serde_json::to_string(&images).unwrap_or_else(|_| "[]".to_string())
 }
 
@@ -214,15 +228,18 @@ fn scrape_images_impl(html: String) -> String {
 #[hayashi_fn]
 pub fn scrape_tables(html: String) -> String {
     let mut tables = Vec::new();
-    
+
     // Simple table extraction: find <table>...</table> blocks
     let mut in_table = false;
     let mut current_table = String::new();
     let mut depth = 0;
-    
+
     for c in html.chars() {
         if c == '<' {
-            let remaining: String = html.chars().skip(html.chars().position(|x| x == c).unwrap_or(0)).collect();
+            let remaining: String = html
+                .chars()
+                .skip(html.chars().position(|x| x == c).unwrap_or(0))
+                .collect();
             if remaining.starts_with("<table") {
                 in_table = true;
                 depth = 1;
@@ -241,12 +258,12 @@ pub fn scrape_tables(html: String) -> String {
                 depth -= 1;
             }
         }
-        
+
         if in_table {
             current_table.push(c);
         }
     }
-    
+
     serde_json::to_string(&tables).unwrap_or_else(|_| "[]".to_string())
 }
 
@@ -257,20 +274,18 @@ pub fn scrape_tables(html: String) -> String {
 #[hayashi_fn]
 pub fn download_file(url: String, filepath: String) -> bool {
     let client = Client::new();
-    
+
     match client.get(&url).send() {
         Ok(response) => {
             if response.status().is_success() {
                 match response.bytes() {
-                    Ok(bytes) => {
-                        match std::fs::write(&filepath, bytes) {
-                            Ok(_) => true,
-                            Err(e) => {
-                                eprintln!("Failed to write file: {}", e);
-                                false
-                            }
+                    Ok(bytes) => match std::fs::write(&filepath, bytes) {
+                        Ok(_) => true,
+                        Err(e) => {
+                            eprintln!("Failed to write file: {}", e);
+                            false
                         }
-                    }
+                    },
                     Err(e) => {
                         eprintln!("Failed to read response: {}", e);
                         false
@@ -296,21 +311,21 @@ pub fn download_file(url: String, filepath: String) -> bool {
 pub fn html_select(html: String, selector: String) -> String {
     // Simplified CSS selector implementation
     let mut results = Vec::new();
-    
+
     if let Some(class_name) = selector.strip_prefix('.') {
         // Class selector
         let search_pattern = format!("class=\"{}\"", class_name);
         let chars = html.chars().peekable();
         let mut buffer = String::new();
-        
+
         for c in chars {
             buffer.push(c);
-            
+
             if buffer.contains(&search_pattern) {
                 // Extract element content (simplified)
                 let start = html.chars().position(|x| x == '<').unwrap_or(0);
                 let remaining: String = html.chars().skip(start).collect();
-                
+
                 if let Some(end) = remaining.find('>') {
                     let content_start = start + end + 1;
                     if let Some(content_end) = html[content_start..].find('<') {
@@ -320,7 +335,7 @@ pub fn html_select(html: String, selector: String) -> String {
                 }
                 buffer.clear();
             }
-            
+
             if buffer.len() > 500 {
                 buffer.clear();
             }
@@ -328,7 +343,7 @@ pub fn html_select(html: String, selector: String) -> String {
     } else if let Some(id_name) = selector.strip_prefix('#') {
         // ID selector
         let search_pattern = format!("id=\"{}\"", id_name);
-        
+
         if html.contains(&search_pattern) {
             // Extract element with this ID (simplified)
             results.push(format!("Element with id: {}", id_name));
@@ -337,13 +352,15 @@ pub fn html_select(html: String, selector: String) -> String {
         // Tag selector
         let tag = selector;
         let search_pattern = format!("<{}", tag);
-        
+
         let mut pos = 0;
         while let Some(start) = html[pos..].find(&search_pattern) {
             let absolute_start = pos + start;
             if let Some(end) = html[absolute_start..].find('>') {
                 let content_start = absolute_start + end + 1;
-                if let Some(content_end) = html[content_start..].find(format!("</{}>", tag).as_str()) {
+                if let Some(content_end) =
+                    html[content_start..].find(format!("</{}>", tag).as_str())
+                {
                     let content = &html[content_start..content_start + content_end];
                     results.push(content.trim().to_string());
                 }
@@ -351,7 +368,7 @@ pub fn html_select(html: String, selector: String) -> String {
             pos = absolute_start + 1;
         }
     }
-    
+
     serde_json::to_string(&results).unwrap_or_else(|_| "[]".to_string())
 }
 
@@ -367,11 +384,11 @@ pub fn html_attr(html: String, _selector: String, attribute: String) -> String {
 
 fn html_attr_impl(html: String, attribute: String) -> String {
     let mut attributes = Vec::new();
-    
+
     // Simplified: search for attribute in all elements
     let search_pattern = format!("{}=\"", attribute);
     let mut pos = 0;
-    
+
     while let Some(start) = html[pos..].find(&search_pattern) {
         let absolute_start = pos + start + search_pattern.len();
         if let Some(end) = html[absolute_start..].find('"') {
@@ -380,7 +397,7 @@ fn html_attr_impl(html: String, attribute: String) -> String {
         }
         pos = absolute_start + 1;
     }
-    
+
     serde_json::to_string(&attributes).unwrap_or_else(|_| "[]".to_string())
 }
 
@@ -392,11 +409,11 @@ fn html_attr_impl(html: String, attribute: String) -> String {
 pub fn html_text(html: String, selector: String) -> String {
     // Simplified: extract text from elements matching selector
     let mut texts = Vec::new();
-    
+
     if let Some(class_name) = selector.strip_prefix('.') {
         // Class selector - extract text from elements with this class
         let search_pattern = format!("class=\"{}\"", class_name);
-        
+
         if html.contains(&search_pattern) {
             // Extract text from element (simplified)
             let text = scrape_text_impl(html.clone());
@@ -406,13 +423,15 @@ pub fn html_text(html: String, selector: String) -> String {
         // Tag selector - extract text from all tags
         let tag = selector;
         let search_pattern = format!("<{}", tag);
-        
+
         let mut pos = 0;
         while let Some(start) = html[pos..].find(&search_pattern) {
             let absolute_start = pos + start;
             if let Some(end) = html[absolute_start..].find('>') {
                 let content_start = absolute_start + end + 1;
-                if let Some(content_end) = html[content_start..].find(format!("</{}>", tag).as_str()) {
+                if let Some(content_end) =
+                    html[content_start..].find(format!("</{}>", tag).as_str())
+                {
                     let content = &html[content_start..content_start + content_end];
                     texts.push(content.trim().to_string());
                 }
@@ -420,7 +439,7 @@ pub fn html_text(html: String, selector: String) -> String {
             pos = absolute_start + 1;
         }
     }
-    
+
     serde_json::to_string(&texts).unwrap_or_else(|_| "[]".to_string())
 }
 
