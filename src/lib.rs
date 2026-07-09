@@ -1,9 +1,9 @@
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 use hayashi_plugin_sdk::{hayashi_fn, hayashi_plugin};
 use reqwest::blocking::Client;
 use reqwest::header::HeaderValue;
 use std::collections::HashMap;
 use std::time::Duration;
-use serde_json;
 
 hayashi_plugin!();
 
@@ -108,9 +108,9 @@ fn scrape_text_impl(html: String) -> String {
     // Simple text extraction: remove tags
     let mut result = String::new();
     let mut in_tag = false;
-    let mut chars = html.chars().peekable();
+    let chars = html.chars().peekable();
     
-    while let Some(c) = chars.next() {
+    for c in chars {
         if c == '<' {
             in_tag = true;
         } else if c == '>' {
@@ -154,7 +154,7 @@ fn scrape_links_impl(html: String) -> String {
                     }
                     break;
                 }
-                link.push(chars.next().unwrap());
+                if let Some(c) = chars.next() { link.push(c); }
             }
         }
         
@@ -196,7 +196,7 @@ fn scrape_images_impl(html: String) -> String {
                     }
                     break;
                 }
-                src.push(chars.next().unwrap());
+                if let Some(c) = chars.next() { src.push(c); }
             }
         }
         
@@ -297,14 +297,13 @@ pub fn html_select(html: String, selector: String) -> String {
     // Simplified CSS selector implementation
     let mut results = Vec::new();
     
-    if selector.starts_with('.') {
+    if let Some(class_name) = selector.strip_prefix('.') {
         // Class selector
-        let class_name = &selector[1..];
         let search_pattern = format!("class=\"{}\"", class_name);
-        let mut chars = html.chars().peekable();
+        let chars = html.chars().peekable();
         let mut buffer = String::new();
         
-        while let Some(c) = chars.next() {
+        for c in chars {
             buffer.push(c);
             
             if buffer.contains(&search_pattern) {
@@ -326,9 +325,8 @@ pub fn html_select(html: String, selector: String) -> String {
                 buffer.clear();
             }
         }
-    } else if selector.starts_with('#') {
+    } else if let Some(id_name) = selector.strip_prefix('#') {
         // ID selector
-        let id_name = &selector[1..];
         let search_pattern = format!("id=\"{}\"", id_name);
         
         if html.contains(&search_pattern) {
@@ -395,9 +393,8 @@ pub fn html_text(html: String, selector: String) -> String {
     // Simplified: extract text from elements matching selector
     let mut texts = Vec::new();
     
-    if selector.starts_with('.') {
+    if let Some(class_name) = selector.strip_prefix('.') {
         // Class selector - extract text from elements with this class
-        let class_name = &selector[1..];
         let search_pattern = format!("class=\"{}\"", class_name);
         
         if html.contains(&search_pattern) {

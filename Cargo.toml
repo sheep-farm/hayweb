@@ -1,9 +1,10 @@
 [package]
 name = "hayweb"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Web scraping and HTTP plugin for Hayashi"
 license = "MIT"
+repository = "https://github.com/sheep-farm/hayweb"
 
 [lib]
 crate-type = ["cdylib"]
@@ -12,3 +13,9 @@ crate-type = ["cdylib"]
 hayashi-plugin-sdk = { git = "https://github.com/sheep-farm/hayashi-plugin-sdk.git", branch = "main" }
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 serde_json = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = "symbols"
+panic = "abort"
