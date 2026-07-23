@@ -634,6 +634,7 @@ fn http_request_body(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn http_request_with_retry(
     method: &str,
     url: &str,
