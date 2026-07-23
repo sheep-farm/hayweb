@@ -572,7 +572,10 @@ fn hayashi_to_serde(value: &HayashiValue) -> serde_json::Value {
     }
 }
 
-fn apply_headers(request: reqwest::blocking::RequestBuilder, headers_json: &str) -> reqwest::blocking::RequestBuilder {
+fn apply_headers(
+    request: reqwest::blocking::RequestBuilder,
+    headers_json: &str,
+) -> reqwest::blocking::RequestBuilder {
     if headers_json.is_empty() {
         return request;
     }
@@ -620,7 +623,11 @@ fn http_request_body(
             if response.status().is_success() {
                 response.text().map_err(|e| e.to_string())
             } else {
-                Err(format!("HTTP {}: {}", response.status().as_u16(), response.status()))
+                Err(format!(
+                    "HTTP {}: {}",
+                    response.status().as_u16(),
+                    response.status()
+                ))
             }
         }
         Err(e) => Err(e.to_string()),
@@ -705,7 +712,11 @@ pub fn json_set(
     path: String,
     new_value: HayashiValue,
 ) -> Result<HayashiValue, String> {
-    let segments: Vec<&str> = path.split('/').map(str::trim).filter(|s| !s.is_empty()).collect();
+    let segments: Vec<&str> = path
+        .split('/')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
     if segments.is_empty() {
         return Ok(new_value);
     }
@@ -757,7 +768,12 @@ pub fn http_get_body(url: String, headers: String, timeout: i64) -> Result<Strin
 }
 
 #[hayashi_fn]
-pub fn http_post_body(url: String, body: String, headers: String, timeout: i64) -> Result<String, String> {
+pub fn http_post_body(
+    url: String,
+    body: String,
+    headers: String,
+    timeout: i64,
+) -> Result<String, String> {
     http_request_body("POST", &url, Some(body), &headers, timeout)
 }
 
@@ -770,7 +786,16 @@ pub fn http_get_retry(
     backoff_min: i64,
     backoff_max: i64,
 ) -> Result<String, String> {
-    http_request_with_retry("GET", &url, None, &headers, timeout, max_retries, backoff_min, backoff_max)
+    http_request_with_retry(
+        "GET",
+        &url,
+        None,
+        &headers,
+        timeout,
+        max_retries,
+        backoff_min,
+        backoff_max,
+    )
 }
 
 #[hayashi_fn]
