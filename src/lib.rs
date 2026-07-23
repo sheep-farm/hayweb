@@ -1,5 +1,7 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
-use hayashi_plugin_sdk::{hayashi_fn, hayashi_plugin};
+use hayashi_plugin_sdk::arrow;
+use hayashi_plugin_sdk::arrow::array::Array;
+use hayashi_plugin_sdk::{hayashi_fn, hayashi_plugin, HayashiValue};
 use reqwest::blocking::Client;
 use reqwest::header::HeaderValue;
 use std::collections::HashMap;
@@ -441,6 +443,361 @@ pub fn html_text(html: String, selector: String) -> String {
     }
 
     serde_json::to_string(&texts).unwrap_or_else(|_| "[]".to_string())
+}
+
+// =============================================================================
+// JSON helpers
+// =============================================================================
+
+fn serde_to_hayashi(value: &serde_json::Value) -> HayashiValue {
+    match value {
+        serde_json::Value::Null => HayashiValue::Nil,
+        serde_json::Value::Bool(b) => HayashiValue::Bool(*b),
+        serde_json::Value::Number(n) => n
+            .as_i64()
+            .map(HayashiValue::Int)
+            .unwrap_or_else(|| HayashiValue::Float(n.as_f64().unwrap_or(f64::NAN))),
+        serde_json::Value::String(s) => HayashiValue::Str(s.clone()),
+        serde_json::Value::Array(arr) => {
+            HayashiValue::List(arr.iter().map(serde_to_hayashi).collect())
+        }
+        serde_json::Value::Object(obj) => HayashiValue::Dict(
+            obj.iter()
+                .map(|(k, v)| (k.clone(), serde_to_hayashi(v)))
+                .collect(),
+        ),
+    }
+}
+
+fn arrow_to_hayashi_values(array: &arrow::array::ArrayRef) -> Vec<HayashiValue> {
+    let len = array.len();
+    let mut values = Vec::with_capacity(len);
+    match array.data_type() {
+        arrow::datatypes::DataType::Float64 => {
+            let arr = array
+                .as_any()
+                .downcast_ref::<arrow::array::Float64Array>()
+                .expect("Float64Array");
+            for i in 0..len {
+                values.push(if arr.is_null(i) {
+                    HayashiValue::Nil
+                } else {
+                    HayashiValue::Float(arr.value(i))
+                });
+            }
+        }
+        arrow::datatypes::DataType::Int64 => {
+            let arr = array
+                .as_any()
+                .downcast_ref::<arrow::array::Int64Array>()
+                .expect("Int64Array");
+            for i in 0..len {
+                values.push(if arr.is_null(i) {
+                    HayashiValue::Nil
+                } else {
+                    HayashiValue::Int(arr.value(i))
+                });
+            }
+        }
+        arrow::datatypes::DataType::Boolean => {
+            let arr = array
+                .as_any()
+                .downcast_ref::<arrow::array::BooleanArray>()
+                .expect("BooleanArray");
+            for i in 0..len {
+                values.push(if arr.is_null(i) {
+                    HayashiValue::Nil
+                } else {
+                    HayashiValue::Bool(arr.value(i))
+                });
+            }
+        }
+        arrow::datatypes::DataType::Utf8 => {
+            let arr = array
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .expect("StringArray");
+            for i in 0..len {
+                values.push(if arr.is_null(i) {
+                    HayashiValue::Nil
+                } else {
+                    HayashiValue::Str(arr.value(i).to_string())
+                });
+            }
+        }
+        other => {
+            for _ in 0..len {
+                values.push(HayashiValue::Nil);
+            }
+            eprintln!("hayweb: unsupported Arrow type for JSON: {:?}", other);
+        }
+    }
+    values
+}
+
+fn hayashi_to_serde(value: &HayashiValue) -> serde_json::Value {
+    match value {
+        HayashiValue::Nil => serde_json::Value::Null,
+        HayashiValue::Float(f) => serde_json::Value::Number(
+            serde_json::Number::from_f64(*f).unwrap_or_else(|| serde_json::Number::from(0)),
+        ),
+        HayashiValue::Int(i) => serde_json::Value::Number((*i).into()),
+        HayashiValue::Bool(b) => serde_json::Value::Bool(*b),
+        HayashiValue::Str(s) => serde_json::Value::String(s.clone()),
+        HayashiValue::List(lst) => {
+            serde_json::Value::Array(lst.iter().map(hayashi_to_serde).collect())
+        }
+        HayashiValue::Dict(map) => serde_json::Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), hayashi_to_serde(v)))
+                .collect(),
+        ),
+        HayashiValue::Arrow(array_ptr, schema_ptr) => {
+            let array = unsafe {
+                let arr_ptr = *array_ptr as *mut arrow::ffi::FFI_ArrowArray;
+                let sch_ptr = *schema_ptr as *mut arrow::ffi::FFI_ArrowSchema;
+                match arrow::ffi::from_ffi(std::ptr::read(arr_ptr), &*sch_ptr) {
+                    Ok(data) => arrow::array::make_array(data),
+                    Err(_) => return serde_json::Value::Null,
+                }
+            };
+            serde_json::Value::Array(
+                arrow_to_hayashi_values(&array)
+                    .iter()
+                    .map(hayashi_to_serde)
+                    .collect(),
+            )
+        }
+        _ => serde_json::Value::Null,
+    }
+}
+
+fn apply_headers(request: reqwest::blocking::RequestBuilder, headers_json: &str) -> reqwest::blocking::RequestBuilder {
+    if headers_json.is_empty() {
+        return request;
+    }
+    if let Ok(header_map) = serde_json::from_str::<HashMap<String, String>>(headers_json) {
+        let mut r = request;
+        for (key, value) in &header_map {
+            if let Ok(header_value) = HeaderValue::from_str(value) {
+                r = r.header(key, header_value);
+            }
+        }
+        r
+    } else {
+        request
+    }
+}
+
+fn http_request_body(
+    method: &str,
+    url: &str,
+    body: Option<String>,
+    headers_json: &str,
+    timeout: i64,
+) -> Result<String, String> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(timeout.max(1) as u64))
+        .build()
+        .unwrap_or_else(|_| Client::new());
+
+    let request = match method {
+        "GET" => client.get(url),
+        "POST" => client.post(url),
+        _ => return Err(format!("unsupported method: {method}")),
+    };
+
+    let request = if let Some(b) = body {
+        request.body(b)
+    } else {
+        request
+    };
+
+    let request = apply_headers(request, headers_json);
+
+    match request.send() {
+        Ok(response) => {
+            if response.status().is_success() {
+                response.text().map_err(|e| e.to_string())
+            } else {
+                Err(format!("HTTP {}: {}", response.status().as_u16(), response.status()))
+            }
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn http_request_with_retry(
+    method: &str,
+    url: &str,
+    body: Option<String>,
+    headers_json: &str,
+    timeout: i64,
+    max_retries: i64,
+    backoff_min: i64,
+    backoff_max: i64,
+) -> Result<String, String> {
+    let mut last_err = String::new();
+    let mut body_opt = body;
+    for attempt in 0..max_retries.max(1) {
+        match http_request_body(method, url, body_opt.clone(), headers_json, timeout) {
+            Ok(text) => return Ok(text),
+            Err(e) => {
+                last_err = e;
+                if attempt >= max_retries.max(1) - 1 {
+                    break;
+                }
+                let min = backoff_min.max(1) as u64;
+                let max = (backoff_max as u64).max(min);
+                let sleep_secs = if min == max {
+                    min
+                } else {
+                    min + (rand::random::<u64>() % (max - min))
+                };
+                std::thread::sleep(Duration::from_secs(sleep_secs));
+            }
+        }
+    }
+    Err(format!("failed after {max_retries} attempts: {last_err}"))
+}
+
+#[hayashi_fn]
+pub fn json_parse(json_str: String) -> Result<HayashiValue, String> {
+    serde_json::from_str::<serde_json::Value>(&json_str)
+        .map(|v| serde_to_hayashi(&v))
+        .map_err(|e| e.to_string())
+}
+
+#[hayashi_fn]
+pub fn json_stringify(value: HayashiValue) -> String {
+    hayashi_to_serde(&value).to_string()
+}
+
+#[hayashi_fn]
+pub fn json_get(value: HayashiValue, path: String) -> HayashiValue {
+    let mut current = value;
+    if path.trim().is_empty() {
+        return current;
+    }
+    for segment in path.split('/') {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            continue;
+        }
+        current = match current {
+            HayashiValue::Dict(map) => match map.get(segment) {
+                Some(v) => v.clone(),
+                None => return HayashiValue::Nil,
+            },
+            HayashiValue::List(lst) => match segment.parse::<usize>() {
+                Ok(i) if i < lst.len() => lst[i].clone(),
+                _ => return HayashiValue::Nil,
+            },
+            _ => return HayashiValue::Nil,
+        };
+    }
+    current
+}
+
+#[hayashi_fn]
+pub fn json_set(
+    mut value: HayashiValue,
+    path: String,
+    new_value: HayashiValue,
+) -> Result<HayashiValue, String> {
+    let segments: Vec<&str> = path.split('/').map(str::trim).filter(|s| !s.is_empty()).collect();
+    if segments.is_empty() {
+        return Ok(new_value);
+    }
+    set_nested(&mut value, &segments, new_value)?;
+    Ok(value)
+}
+
+fn set_nested(
+    value: &mut HayashiValue,
+    segments: &[&str],
+    new_value: HayashiValue,
+) -> Result<(), String> {
+    if segments.len() == 1 {
+        match value {
+            HayashiValue::Dict(map) => {
+                map.insert(segments[0].to_string(), new_value);
+                Ok(())
+            }
+            HayashiValue::List(lst) => match segments[0].parse::<usize>() {
+                Ok(i) if i < lst.len() => {
+                    lst[i] = new_value;
+                    Ok(())
+                }
+                _ => Err(format!("index {} out of range", segments[0])),
+            },
+            _ => Err("json_set target is not dict or list".into()),
+        }
+    } else {
+        match value {
+            HayashiValue::Dict(map) => {
+                let key = segments[0].to_string();
+                let next = map
+                    .entry(key)
+                    .or_insert_with(|| HayashiValue::Dict(HashMap::new()));
+                set_nested(next, &segments[1..], new_value)
+            }
+            HayashiValue::List(lst) => match segments[0].parse::<usize>() {
+                Ok(i) if i < lst.len() => set_nested(&mut lst[i], &segments[1..], new_value),
+                _ => Err(format!("index {} out of range", segments[0])),
+            },
+            _ => Err("json_set target is not dict or list".into()),
+        }
+    }
+}
+
+#[hayashi_fn]
+pub fn http_get_body(url: String, headers: String, timeout: i64) -> Result<String, String> {
+    http_request_body("GET", &url, None, &headers, timeout)
+}
+
+#[hayashi_fn]
+pub fn http_post_body(url: String, body: String, headers: String, timeout: i64) -> Result<String, String> {
+    http_request_body("POST", &url, Some(body), &headers, timeout)
+}
+
+#[hayashi_fn]
+pub fn http_get_retry(
+    url: String,
+    headers: String,
+    timeout: i64,
+    max_retries: i64,
+    backoff_min: i64,
+    backoff_max: i64,
+) -> Result<String, String> {
+    http_request_with_retry("GET", &url, None, &headers, timeout, max_retries, backoff_min, backoff_max)
+}
+
+#[hayashi_fn]
+pub fn http_post_retry(
+    url: String,
+    body: String,
+    headers: String,
+    timeout: i64,
+    max_retries: i64,
+    backoff_min: i64,
+    backoff_max: i64,
+) -> Result<String, String> {
+    http_request_with_retry(
+        "POST",
+        &url,
+        Some(body),
+        &headers,
+        timeout,
+        max_retries,
+        backoff_min,
+        backoff_max,
+    )
+}
+
+#[hayashi_fn]
+pub fn sleep(seconds: i64) {
+    std::thread::sleep(Duration::from_millis(seconds.max(0) as u64 * 1000));
 }
 
 #[cfg(test)]

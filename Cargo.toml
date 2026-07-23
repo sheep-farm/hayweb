@@ -10,9 +10,10 @@ repository = "https://github.com/sheep-farm/hayweb"
 crate-type = ["cdylib"]
 
 [dependencies]
-hayashi-plugin-sdk = { git = "https://github.com/sheep-farm/hayashi-plugin-sdk.git", branch = "main" }
+hayashi-plugin-sdk = { path = "/home/flavop/GitHub/hayashi-plugin-sdk/sdk" }
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 serde_json = "1.0"
+rand = "0.8"
 
 [profile.release]
 opt-level = 3
