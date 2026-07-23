@@ -638,7 +638,7 @@ fn http_request_with_retry(
     backoff_max: i64,
 ) -> Result<String, String> {
     let mut last_err = String::new();
-    let mut body_opt = body;
+    let body_opt = body;
     for attempt in 0..max_retries.max(1) {
         match http_request_body(method, url, body_opt.clone(), headers_json, timeout) {
             Ok(text) => return Ok(text),
